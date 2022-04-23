@@ -1,13 +1,19 @@
 #!/bin/bash
 
-processes=12
-input="ABCDEFG"
+# get tree
+input=$1
 
-#preklad cpp zdrojaku
+# count input len
+input_len=${#input}
+
+# get number of processes
+processes=$(($input_len * 2 - 2))
+
+# compile source files
 mpic++ -o preorder preorder.cpp
 
-#spusteni
+# run program
 mpirun  -np ${processes} ./preorder ${input}
 
-#uklid
+# clean up
 rm -f preorder
