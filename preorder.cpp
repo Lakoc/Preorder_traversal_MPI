@@ -208,18 +208,79 @@ int main(int argc, char **argv) {
     if (MPI_Allgather(&e_next, 1, MPI_UNSIGNED, succesors.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
     if (MPI_Allgather(&weight, 1, MPI_UNSIGNED, weights.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
 
+    std::vector<unsigned> data_curr{weight, e_next};
+    int request_origin = 0;
+    std::vector<unsigned> r_buf(2);
 //    // Debug print
-//    if (rank == ROOT_NODE) {
-//        print_single_arr(succesors, "e_tour");
+    if (rank == ROOT_NODE) {
+        print_single_arr(succesors, "e_tour");
+    }
+    if (MPI_Barrier(MPI_COMM_WORLD)) { mpi_error(); }
+
+
+//    if (edge_id == LAST_EDGE) {
+//        break;
 //    }
 
     // Core computation of suffix sum
     for (int i = 0; i < pss_steps; ++i) {
-        weight += weights[e_next - 1];
-        e_next = succesors[e_next - 1];
-        if (MPI_Allgather(&e_next, 1, MPI_UNSIGNED, succesors.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
-        if (MPI_Allgather(&weight, 1, MPI_UNSIGNED, weights.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
+        if (edge_id == LAST_EDGE) {
+            break;
+        }
+
+        if (e_next != LAST_EDGE) {
+            if(rank ==0 || rank ==4)
+                std::cout << "rank: " << rank +1<< " send request to " << e_next  << "\n"<< std::flush;
+
+            if (MPI_Send(&rank, 1, MPI_INT, e_next - 1, REQUEST_TAG, MPI_COMM_WORLD)) { mpi_error(); }
+
+            if (MPI_Recv(&request_origin, 1, MPI_INT, MPI_ANY_SOURCE, REQUEST_TAG, MPI_COMM_WORLD,
+                         MPI_STATUS_IGNORE)) { mpi_error(); }
+            if(rank ==0 || rank ==4)
+                std::cout << "rank: "<< rank +1<< " received request from " << request_origin +1 << "\n"<< std::flush;
+
+        } else {
+            if (MPI_Recv(&request_origin, 1, MPI_INT, MPI_ANY_SOURCE, REQUEST_TAG, MPI_COMM_WORLD,
+                         MPI_STATUS_IGNORE)) { mpi_error(); }
+            if(rank ==0 || rank ==4)
+                std::cout << "rank: "<< rank +1<< " received request from " << request_origin +1 << "\n"<< std::flush;
+        }
+
+        if (request_origin == - NO_REQUEST) {
+            break;
+        } else {
+            r_buf[0] = weight;
+            r_buf[1] = e_next;
+            if(rank ==0 || rank ==4)
+                std::cout << "rank: "<< rank +1<< " sending response to " << request_origin +1 << "\n"<< std::flush;
+            if (MPI_Send(r_buf.data(), 2, MPI_UNSIGNED, request_origin, DEFAULT_TAG, MPI_COMM_WORLD)) { mpi_error(); }
+        }
+
+        if (e_next == LAST_EDGE) {
+            r_buf[0] = 0;
+            r_buf[1] = e_next;
+            if(rank ==0)
+            std::cout << "rank: "<< rank +1<< " skip waiting for data from " << e_next << "\n" << std::flush;
+        } else {
+            if(rank ==0 || rank ==4)
+                std::cout << "rank: "<< rank +1<< " waiting for data from " << e_next << "\n" << std::flush;
+            if (MPI_Recv(r_buf.data(), 2, MPI_UNSIGNED, e_next - 1, DEFAULT_TAG, MPI_COMM_WORLD,
+                         MPI_STATUS_IGNORE)) { mpi_error(); }
+            if(rank ==0 || rank ==4)
+                std::cout << "rank: "<< rank +1<< " received data from " << e_next << "\n" << std::flush;
+
+        }
+        if(rank ==0 || rank ==4)
+            std::cout << "rank: " << rank +1 << " weight_next: " << r_buf[0] << " succ next: " << r_buf[1] << "\n"<< std::flush;
+        weight += r_buf[0];
+        e_next = r_buf[1];
+
+
+//        if (MPI_Allgather(&e_next, 1, MPI_UNSIGNED, succesors.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
+//        if (MPI_Allgather(&weight, 1, MPI_UNSIGNED, weights.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
     }
+    if (MPI_Barrier(MPI_COMM_WORLD)) { mpi_error(); }
+
 
     /* Correction step
      * */

@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#define DEBUG false
+#define DEBUG true
 #define debug_print(x) do {if (DEBUG)   std::cerr << x; } while (0)
 
 #define ROOT_NODE 0
@@ -22,6 +22,9 @@
 #define EVEN_OFFSET_START 3
 #define N_CHILDREN 2
 #define NIL -1
+#define DEFAULT_TAG 0
+#define REQUEST_TAG 1
+#define NO_REQUEST -1
 
 unsigned log2base(unsigned val);
 
