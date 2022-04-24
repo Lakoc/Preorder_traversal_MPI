@@ -78,7 +78,7 @@ void print_single_arr(std::vector <T> arr, std::string name) {
     for (T item: arr) {
         debug_print(item << " ");
     }
-    debug_print("\n");
+    debug_print(std::endl);
 }
 
 /*
@@ -145,12 +145,6 @@ int main(int argc, char **argv) {
     unsigned n_edges = (2 * n_nodes) - 2;
     unsigned tree_depth = ceil(log2(n_nodes));
 
-    if(n_nodes == 1){
-        std::cout << input_tree << "\n";
-        if (MPI_Finalize()) { mpi_error(); }
-        return EXIT_SUCCESS;
-    }
-
     // Auxiliary arrays to keep adjacency matrix in linear complexity
     std::vector<unsigned> target_nodes;
     std::vector<int> next_edge;
@@ -161,6 +155,15 @@ int main(int argc, char **argv) {
 
     // Load each process rank
     if (MPI_Comm_rank(MPI_COMM_WORLD, &rank)) { mpi_error(); }
+
+    if (n_nodes == 1) {
+        if (rank == ROOT_NODE) {
+
+            std::cout << input_tree << std::endl;
+        }
+        if (MPI_Finalize()) { mpi_error(); }
+        return EXIT_SUCCESS;
+    }
 
     // Algorithms in PRL slides work with indexing from 1 -> follow convention
     unsigned edge_id = (unsigned) rank + 1;
@@ -250,7 +253,7 @@ int main(int argc, char **argv) {
                 result[edge] = input_tree[input_position];
             }
         }
-        std::cout << result << "\n";
+        std::cout << result << std::endl;
     }
 
     if (MPI_Finalize()) { mpi_error(); }
