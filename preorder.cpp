@@ -137,7 +137,6 @@ void load_adjacent_representation(std::vector<unsigned> &target_nodes,
 
 int main(int argc, char **argv) {
     if (MPI_Init(&argc, &argv)) { mpi_error(); }
-
     // Load input tree
     std::string input_tree = argv[1]; // Name of the current exec program
 
@@ -145,6 +144,12 @@ int main(int argc, char **argv) {
     unsigned n_nodes = input_tree.length();
     unsigned n_edges = (2 * n_nodes) - 2;
     unsigned tree_depth = ceil(log2(n_nodes));
+
+    if(n_nodes == 1){
+        std::cout << input_tree << "\n";
+        if (MPI_Finalize()) { mpi_error(); }
+        return EXIT_SUCCESS;
+    }
 
     // Auxiliary arrays to keep adjacency matrix in linear complexity
     std::vector<unsigned> target_nodes;
