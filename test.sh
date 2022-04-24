@@ -13,7 +13,7 @@ processes=$(($input_len * 2 - 2))
 mpic++ -o preorder preorder.cpp
 
 # run program
-mpirun  -np ${processes} ./preorder ${input}
+mpirun -oversubscribe -np ${processes} ./preorder ${input}
 
 # clean up
 rm -f preorder
