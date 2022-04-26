@@ -84,55 +84,65 @@ void print_single_arr(std::vector <T> arr, std::string name) {
 /*
  * Function:  load_adjacent_representation
  * --------------------
- * Create adjacent matrix in form of multiple arrays, fill up following arrays.
+ * Create adjacent matrix in constant time parallel for each processor
  *
- *  target_nodes: array of edge target nodes
+ *  target_node: destination of current edge
  *
- *  next_edge: array of `pointers` to the next edge, contains NIL if next edge does not exist
- *
- *  nodes_first_edge: array of first edges reachable from node
+ *  next_edge: `pointer` to the next edge, contains NIL if next edge does not exist
  *
  *  tree_depth: depth of tree - 1
  *
- *  n_nodes: number of nodes in tree
- *
  *  n_edges: number of edges in tree
  */
-void load_adjacent_representation(std::vector<unsigned> &target_nodes,
-                                  std::vector<int> &next_edge, std::vector<unsigned> &nodes_first_edge,
-                                  unsigned tree_depth, unsigned n_nodes, unsigned n_edges) {
-    unsigned first_forward = ROOT_ID + 1;
-    unsigned backward_start = ROOT_ID * N_CHILDREN;
-    unsigned even_offset = EVEN_OFFSET_START;
-    for (unsigned i = 0; i < n_edges; ++i) {
-        if (even(i)) {
-            target_nodes.push_back(first_forward);
-            first_forward += 1;
-            if (even(i / 2) && i + N_CHILDREN + 1 <= n_edges) {
-                next_edge.push_back(i + N_CHILDREN + 1);
+void
+load_adjacent_representation(int rank, unsigned *target_node, int *next_edge,
+                             unsigned tree_depth, unsigned n_edges) {
+    unsigned edge_id = (unsigned) rank + 1;
+    if (even(rank)) {
+        *target_node = ROOT_ID + 1 + (rank / 2);
+        if (even(rank / 2) && edge_id + N_CHILDREN <= n_edges) {
+            *next_edge = edge_id + N_CHILDREN;
+        } else {
+            *next_edge = NIL;
+        }
+
+    } else {
+        *target_node = ((rank / 2) + (N_CHILDREN)) / BACKWARD_NODES;
+        if (edge_id + (rank / 2 * N_CHILDREN) + EVEN_OFFSET_START <= n_edges) {
+            if (tree_depth <= 1) {
+                *next_edge = (NIL);
             } else {
-                next_edge.push_back(NIL);
+                *next_edge = edge_id + (rank / 2 * N_CHILDREN) + EVEN_OFFSET_START;
             }
         } else {
-            target_nodes.push_back(backward_start / BACKWARD_NODES);
-            backward_start += 1;
-            if (i + even_offset + 1 <= n_edges) {
-                if (tree_depth <= 1) {
-                    next_edge.push_back(NIL);
-                } else {
-                    next_edge.push_back(i + even_offset + 1);
-                }
-                even_offset += N_CHILDREN;
-            } else {
-                next_edge.push_back(NIL);
-            }
+            *next_edge = NIL;
         }
     }
+}
 
-    nodes_first_edge.push_back(ROOT_ID);
-    for (unsigned i = 1; i < n_nodes; ++i) {
-        nodes_first_edge.push_back(i * N_CHILDREN);
-    }
+/*
+ * Function:  get_reversed_next_edge
+ * --------------------
+ * Request data from reversed processor
+ *
+ *  rank: curr processor rank
+ *
+ *  reversed_rank: reversed edge processor rank
+ *
+ *  next_edge: processor data to be sent
+ *
+ *  returns: reversed processor next edge
+ */
+int get_reversed_next_edge(unsigned rank, unsigned reversed_rank, int next_edge) {
+    MPI_Request req;
+    int reversed_next_edge;
+
+    if (MPI_Isend(&next_edge, 1, MPI_INT, reversed_rank, DEFAULT_TAG, MPI_COMM_WORLD, &req)) { mpi_error(); }
+    if (MPI_Recv(&reversed_next_edge, 1, MPI_INT, MPI_ANY_SOURCE, DEFAULT_TAG, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE)) { mpi_error(); }
+
+    if (MPI_Request_free(&req)) { mpi_error(); }
+    return reversed_next_edge;
 }
 
 int main(int argc, char **argv) {
@@ -144,11 +154,6 @@ int main(int argc, char **argv) {
     unsigned n_nodes = input_tree.length();
     unsigned n_edges = (2 * n_nodes) - 2;
     unsigned tree_depth = ceil(log2(n_nodes));
-
-    // Auxiliary arrays to keep adjacency matrix in linear complexity
-    std::vector<unsigned> target_nodes;
-    std::vector<int> next_edge;
-    std::vector<unsigned> nodes_first_edge;
 
     // Auxiliary variables to read rank of each processor
     int rank;
@@ -172,16 +177,10 @@ int main(int argc, char **argv) {
     unsigned reverse_edge = even(edge_id) ? edge_id - 1 : edge_id + 1;
     unsigned weight = (unsigned) even(rank);
 
-    // Load adjacent representation, this is not part of pre-order algorithm, no need to optimize prize,
-    // broadcasting from root node may be slower than calling with all processors
-    load_adjacent_representation(target_nodes, next_edge, nodes_first_edge, tree_depth, n_nodes, n_edges);
-    if (MPI_Barrier(MPI_COMM_WORLD)) { mpi_error(); }
-
-//    // Debug print
-//    if (rank == ROOT_NODE) {
-//        prints_adjacent_representation(target_nodes, next_edge, nodes_first_edge);
-//    }
-
+    // Load adjacent representation, compute for each edge target node and next edge in constant time
+    unsigned target_node;
+    int next_edge;
+    load_adjacent_representation(rank, &target_node, &next_edge, tree_depth, n_edges);
 
     /* Euler tour
      * Get pointer to the next node in constant time by reading data from adjacent matrix
@@ -189,21 +188,24 @@ int main(int argc, char **argv) {
 
     unsigned e_next;
 
-    if (next_edge[reverse_edge - 1] == NIL) {
-        e_next = nodes_first_edge[target_nodes[rank] - 1];
-    } else {
-        e_next = next_edge[reverse_edge - 1];
-    }
+    int reversed_next_rank = get_reversed_next_edge(rank, reverse_edge - 1, next_edge);
 
-    // Parallel suffix sum presupposes last edge to contain cycle, process correction
-    if (edge_id == LAST_EDGE) {
-        e_next = edge_id;
+    if (reversed_next_rank == NIL) {
+        e_next = target_node == 1 ? target_node : (target_node - 1) * 2;
+    } else {
+        e_next = reversed_next_rank;
     }
 
     /* Parallel suffix sum
      * No need to process first step by setting val of last edge to 0 and correction step,
      * because last edge is backward edge, so it's weight is already 0.
      * */
+
+    // Parallel suffix sum presupposes last edge to contain cycle, process correction
+    if (edge_id == LAST_EDGE) {
+        e_next = edge_id;
+    }
+
     std::vector<unsigned> succesors(n_edges);
     std::vector<unsigned> weights(n_edges);
 
@@ -213,6 +215,7 @@ int main(int argc, char **argv) {
     // Steps to be processed (log n complexity)
     unsigned pss_steps = ceil(log2((float) n_edges));
 
+    // Synchronize information between nodes
     if (MPI_Allgather(&e_next, 1, MPI_UNSIGNED, succesors.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
     if (MPI_Allgather(&weight, 1, MPI_UNSIGNED, weights.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
 
@@ -222,7 +225,7 @@ int main(int argc, char **argv) {
 //    }
 
     // Core computation of suffix sum
-    for (int i = 0; i < pss_steps; ++i) {
+    for (int i = 0; i < pss_steps; i++) {
         weight += weights[e_next - 1];
         e_next = succesors[e_next - 1];
         if (MPI_Allgather(&e_next, 1, MPI_UNSIGNED, succesors.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
@@ -239,7 +242,11 @@ int main(int argc, char **argv) {
     /* Collect edge preorder ranking and print traversal to stdout
      * */
     std::vector<unsigned> preorders(n_edges);
+    std::vector<unsigned> target_nodes(n_edges);
+
     if (MPI_Gather(&preorder, 1, MPI_UNSIGNED, preorders.data(), 1, MPI_UNSIGNED, ROOT_NODE,
+                   MPI_COMM_WORLD)) { mpi_error(); }
+    if (MPI_Gather(&target_node, 1, MPI_UNSIGNED, target_nodes.data(), 1, MPI_UNSIGNED, ROOT_NODE,
                    MPI_COMM_WORLD)) { mpi_error(); }
 
     if (rank == ROOT_NODE) {
