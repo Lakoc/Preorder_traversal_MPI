@@ -18,6 +18,8 @@
 #define NIL -1
 #define ROOT_NODE 0
 #define DEFAULT_TAG 0
+#define BACKWARD_EDGE 0
+#define FORWARD_EDGE 1
 #define ROOT_ID 1
 #define BACKWARD_NODES 2
 #define N_CHILDREN 2
@@ -36,7 +38,8 @@ void print_single_arr(std::vector <T> arr, std::string name);
 void prints_adjacent_representation(std::vector<unsigned> target_nodes,
                                     std::vector<int> next_edge, std::vector<unsigned> nodes_first_edge);
 
-void load_adjacent_representation(int rank, unsigned *target_node, int *next_edge,
+void load_adjacent_representation(int rank, unsigned *edge_id, unsigned *reverse_edge, unsigned *weight,
+                                  unsigned *target_node, int *next_edge,
                                   unsigned tree_depth, unsigned n_edges);
 
 int get_reversed_next_edge(unsigned rank, unsigned reversed_rank, int next_edge);

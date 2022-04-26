@@ -86,6 +86,12 @@ void print_single_arr(std::vector <T> arr, std::string name) {
  * --------------------
  * Create adjacent matrix in constant time parallel for each processor
  *
+ *  edge_id: algorithms in PRL slides work with indexing from 1 -> follow convention
+ *
+ *  reverse_edge: id of reverse edge
+ *
+ *  weight: weight FORWARD=1 BACKWARD=0
+ *
  *  target_node: destination of current edge
  *
  *  next_edge: `pointer` to the next edge, contains NIL if next edge does not exist
@@ -95,24 +101,30 @@ void print_single_arr(std::vector <T> arr, std::string name) {
  *  n_edges: number of edges in tree
  */
 void
-load_adjacent_representation(int rank, unsigned *target_node, int *next_edge,
+load_adjacent_representation(int rank, unsigned *edge_id, unsigned *reverse_edge, unsigned *weight,
+                             unsigned *target_node, int *next_edge,
                              unsigned tree_depth, unsigned n_edges) {
-    unsigned edge_id = (unsigned) rank + 1;
+    *edge_id = (unsigned) rank + 1;
+    // Compute reverse edge id and weight
     if (even(rank)) {
+        *weight = FORWARD_EDGE;
+        *reverse_edge = *edge_id + 1;
         *target_node = ROOT_ID + 1 + (rank / 2);
-        if (even(rank / 2) && edge_id + N_CHILDREN <= n_edges) {
-            *next_edge = edge_id + N_CHILDREN;
+        if (even(rank / 2) && *edge_id + N_CHILDREN <= n_edges) {
+            *next_edge = *edge_id + N_CHILDREN;
         } else {
             *next_edge = NIL;
         }
 
     } else {
+        *weight = BACKWARD_EDGE;
+        *reverse_edge = *edge_id - 1;
         *target_node = ((rank / 2) + (N_CHILDREN)) / BACKWARD_NODES;
-        if (edge_id + (rank / 2 * N_CHILDREN) + EVEN_OFFSET_START <= n_edges) {
+        if (*edge_id + (rank / 2 * N_CHILDREN) + EVEN_OFFSET_START <= n_edges) {
             if (tree_depth <= 1) {
                 *next_edge = (NIL);
             } else {
-                *next_edge = edge_id + (rank / 2 * N_CHILDREN) + EVEN_OFFSET_START;
+                *next_edge = *edge_id + (rank / 2 * N_CHILDREN) + EVEN_OFFSET_START;
             }
         } else {
             *next_edge = NIL;
@@ -147,6 +159,7 @@ int get_reversed_next_edge(unsigned rank, unsigned reversed_rank, int next_edge)
 
 int main(int argc, char **argv) {
     if (MPI_Init(&argc, &argv)) { mpi_error(); }
+
     // Load input tree
     std::string input_tree = argv[1]; // Name of the current exec program
 
@@ -161,33 +174,28 @@ int main(int argc, char **argv) {
     // Load each process rank
     if (MPI_Comm_rank(MPI_COMM_WORLD, &rank)) { mpi_error(); }
 
+    // Number of edges == 0, MPI will fail, return input
     if (n_nodes == 1) {
         if (rank == ROOT_NODE) {
-
             std::cout << input_tree << std::endl;
         }
         if (MPI_Finalize()) { mpi_error(); }
         return EXIT_SUCCESS;
     }
 
-    // Algorithms in PRL slides work with indexing from 1 -> follow convention
-    unsigned edge_id = (unsigned) rank + 1;
-
-    // Compute reverse edge id and weight
-    unsigned reverse_edge = even(edge_id) ? edge_id - 1 : edge_id + 1;
-    unsigned weight = (unsigned) even(rank);
-
-    // Load adjacent representation, compute for each edge target node and next edge in constant time
-    unsigned target_node;
+    /* Parse graph
+     * Load adjacent representation, compute for each edge target node and next edge in constant time
+     */
+    unsigned target_node, reverse_edge, weight, edge_id;
     int next_edge;
-    load_adjacent_representation(rank, &target_node, &next_edge, tree_depth, n_edges);
+
+    load_adjacent_representation(rank, &edge_id, &reverse_edge, &weight, &target_node, &next_edge, tree_depth, n_edges);
+
 
     /* Euler tour
      * Get pointer to the next node in constant time by reading data from adjacent matrix
      * */
-
     unsigned e_next;
-
     int reversed_next_rank = get_reversed_next_edge(rank, reverse_edge - 1, next_edge);
 
     if (reversed_next_rank == NIL) {
@@ -201,7 +209,8 @@ int main(int argc, char **argv) {
      * because last edge is backward edge, so it's weight is already 0.
      * */
 
-    // Parallel suffix sum presupposes last edge to contain cycle, process correction
+    // Parallel suffix sum presupposes last edge to contain cycle, process correction, always edge with id==4,
+    // due to the representation
     if (edge_id == LAST_EDGE) {
         e_next = edge_id;
     }
@@ -218,11 +227,6 @@ int main(int argc, char **argv) {
     // Synchronize information between nodes
     if (MPI_Allgather(&e_next, 1, MPI_UNSIGNED, succesors.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
     if (MPI_Allgather(&weight, 1, MPI_UNSIGNED, weights.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD)) { mpi_error(); }
-
-//    // Debug print
-//    if (rank == ROOT_NODE) {
-//        print_single_arr(succesors, "e_tour");
-//    }
 
     // Core computation of suffix sum
     for (int i = 0; i < pss_steps; i++) {
@@ -250,8 +254,6 @@ int main(int argc, char **argv) {
                    MPI_COMM_WORLD)) { mpi_error(); }
 
     if (rank == ROOT_NODE) {
-//        // Debug print
-//        print_single_arr(preorders, "preorders");
         std::string result(input_tree.length(), input_tree[0]);
         for (int i = 0; i < n_edges; i++) {
             unsigned edge = preorders[i];
